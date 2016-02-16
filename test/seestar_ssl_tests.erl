@@ -6,6 +6,16 @@
 -export([]).
 
 ssl_test_() ->
+    case has_ccm() of
+        true ->
+            ssl_test_with_ccm();
+        false -> []
+    end.
+
+has_ccm() ->
+    os:cmd("whereis ccm") =/= "ccm:\n".
+
+ssl_test_with_ccm() ->
     {setup,
         fun() ->
             seestar_ccm:create(),
