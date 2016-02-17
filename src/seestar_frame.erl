@@ -15,7 +15,7 @@
 %%% @private
 -module(seestar_frame).
 
--export([new/4, id/1, flags/1, has_flag/2, opcode/1,
+-export([new/5, id/1, flags/1, has_flag/2, opcode/1,
          body/1, encode/1, pending_size/1, decode/1]).
 
 -type stream_id() :: -1..127.
@@ -26,7 +26,13 @@
 -define(COMPRESSION, 16#01).
 -define(TRACING, 16#02).
 
--record(frame, {id :: stream_id(),
+-define(REQ_VSN3,  16#03).
+-define(RESP_VSN3, 16#83).
+-define(REQ_VSN4,  16#04).
+-define(RESP_VSN4, 16#84).
+
+-record(frame, {proto,
+                id :: stream_id(),
                 flags = [] :: [flag()],
                 opcode :: opcode(),
                 body :: binary()}).
@@ -36,9 +42,9 @@
 %% API
 %% -------------------------------------------------------------------------
 
--spec new(stream_id(), [flag()], opcode(), binary()) -> frame().
-new(ID, Flags, Op, Body) ->
-    #frame{id = ID, flags = Flags, opcode = Op, body = Body}.
+-spec new(integer(), stream_id(), [flag()], opcode(), binary()) -> frame().
+new(ProtoVsn, ID, Flags, Op, Body) ->
+    #frame{proto=ProtoVsn, id = ID, flags = Flags, opcode = Op, body = Body}.
 
 -spec id(frame()) -> stream_id().
 id(Frame) ->
@@ -61,8 +67,8 @@ body(Frame) ->
     Frame#frame.body.
 
 -spec encode(frame()) -> binary().
-encode(#frame{id = ID, flags = Flags, opcode = Op, body = Body}) ->
-    <<16#04, (encode_flags(Flags)), ID:16/signed, Op, (size(Body)):32, Body/binary>>.
+encode(#frame{proto=ProtoVsn, id = ID, flags = Flags, opcode = Op, body = Body}) ->
+    <<ProtoVsn, (encode_flags(Flags)), ID:16/signed, Op, (size(Body)):32, Body/binary>>.
 
 encode_flags(Flags) ->
     lists:foldl(fun(Flag, Byte) -> encode_flag(Flag) bor Byte end, 0, Flags).
@@ -78,12 +84,17 @@ pending_size(_) ->
 
 -spec decode(binary()) -> {[frame()], binary()}.
 decode(Stream) ->
+    assert_protocol_version(Stream),
     decode(Stream, []).
-decode(<<16#84, Flags, ID:16/signed, Op, Size:32, Body:Size/binary, Rest/binary>>, Acc) ->
+decode(<<_ProtoVsn, Flags, ID:16/signed, Op, Size:32, Body:Size/binary, Rest/binary>>, Acc) ->
     Frame = #frame{id = ID, flags = decode_flags(Flags), opcode = Op, body = Body},
     decode(Rest, [Frame|Acc]);
 decode(Stream, Acc) ->
     {lists:reverse(Acc), Stream}.
+
+assert_protocol_version(<<?RESP_VSN3, _/binary>>) -> ok;
+assert_protocol_version(<<?RESP_VSN4, _/binary>>) -> ok;
+assert_protocol_version(<<>>)                     -> ok.
 
 decode_flags(Byte) ->
     F = fun(Mask, Flags) when Byte band Mask =:= Mask ->

@@ -18,6 +18,7 @@
 
 -include("seestar_messages.hrl").
 -include("builtin_types.hrl").
+-include_lib("seestar/include/constants.hrl").
 
 %% API exports.
 -export([start_link/2, start_link/3, start_link/4, stop/1]).
@@ -89,17 +90,21 @@ start_link(Host, Port, ClientOptions) ->
 -spec start_link(host(), inet:port_number(), [client_option()], [connect_option()]) ->
     {ok, pid(), client()} | {error, any()}.
 start_link(Host, Port, ClientOptions, ConnectOptions) ->
+    case start_link(4, Host, Port, ClientOptions, ConnectOptions) of
+        protocol_error ->
+            %% Downgrade version
+            start_link(3, Host, Port, ClientOptions, ConnectOptions);
+        Result ->
+            Result
+    end.
+
+start_link(ProtoVsn, Host, Port, ClientOptions, ConnectOptions) ->
      case gen_server:start_link(?MODULE, [Host, Port, ConnectOptions], []) of
         {ok, Pid} ->
-            Client4 = #client_handle{pid=Pid, proto=4},
-            Client3 = #client_handle{pid=Pid, proto=3},
-            case setup(Client4, ClientOptions, 2000) of
-                ok    -> {ok, Pid, Client4};
-                Error ->
-                    case setup(Client3, ClientOptions, 2000) of
-                        ok    -> {ok, Pid, Client3};
-                        Error -> stop(Pid), Error
-                    end
+            Client = #client_handle{pid=Pid, proto=ProtoVsn},
+            case setup(Client, ClientOptions, 2000) of
+                ok    -> {ok, Pid, Client};
+                Error -> stop(Pid), Error
             end;
         Error ->
             Error
@@ -119,7 +124,9 @@ setup(Client, Options, Timeout) ->
                         false -> {error, invalid_events};
                         true  -> ok
                     end
-            end
+            end;
+        protocol_error ->
+            protocol_error
     end.
 
 set_protocol_version(#client_handle{pid=Pid, proto=ProtoVsn}) ->
@@ -137,7 +144,9 @@ authenticate(Client, Options, Timeout) ->
             case request(Client, #credentials{credentials = KVPairs}, true, Timeout) of
                 #ready{} -> true;
                 #error{} -> false
-            end
+            end;
+        #error{code = ?PROTOCOL_ERROR} ->
+            protocol_error
     end.
 
 set_keyspace(Client, Options) ->
@@ -315,9 +324,10 @@ handle_call({request, Op, Body, Sync}, {_Pid, Ref} = From, St) ->
 handle_call(Request, _From, St) ->
     {stop, {unexpected_call, Request}, St}.
 
-send_request(#req{op = Op, body = Body, from = From, sync = Sync}, #st{sock = Sock, transport = Transport} = St) ->
+send_request(#req{op = Op, body = Body, from = From, sync = Sync},
+             #st{proto = ProtoVsn, sock = Sock, transport = Transport} = St) ->
     ID = hd(St#st.free_ids),
-    Frame = seestar_frame:new(ID, [], Op, Body),
+    Frame = seestar_frame:new(ProtoVsn, ID, [], Op, Body),
     case send_on_wire(Sock, Transport, seestar_frame:encode(Frame)) of
         ok ->
             ets:insert(St#st.reqs, {ID, From, Sync}),
