@@ -87,7 +87,7 @@ start_link(Host, Port, ClientOptions) ->
 start_link(Host, Port, ClientOptions, ConnectOptions) ->
      case gen_server:start_link(?MODULE, [Host, Port, ConnectOptions], []) of
         {ok, Pid} ->
-            case setup(Pid, ClientOptions) of
+            case setup(Pid, ClientOptions, 2000) of
                 ok    -> {ok, Pid};
                 Error -> stop(Pid), Error
             end;
@@ -95,8 +95,8 @@ start_link(Host, Port, ClientOptions, ConnectOptions) ->
             Error
     end.
 
-setup(Pid, Options) ->
-    case authenticate(Pid, Options) of
+setup(Pid, Options, Timeout) ->
+    case authenticate(Pid, Options, Timeout) of
         false ->
             {error, invalid_credentials};
         true ->
@@ -111,16 +111,16 @@ setup(Pid, Options) ->
             end
     end.
 
-authenticate(Pid, Options) ->
+authenticate(Pid, Options, Timeout) ->
     Credentials = proplists:get_value(credentials, Options),
-    case request(Pid, #startup{}, true) of
+    case request(Pid, #startup{}, true, Timeout) of
         #ready{} ->
             true;
         #authenticate{} when Credentials =:= undefined ->
             false;
         #authenticate{} ->
             KVPairs = [ {?l2b(K), ?l2b(V)} || {K, V} <- Credentials ],
-            case request(Pid, #credentials{credentials = KVPairs}, true) of
+            case request(Pid, #credentials{credentials = KVPairs}, true, Timeout) of
                 #ready{} -> true;
                 #error{} -> false
             end
@@ -217,8 +217,11 @@ execute_async(Client, QueryID, Types, Values, Consistency) ->
     request(Client, Req, false).
 
 request(Client, Request, Sync) ->
+    request(Client, Request, Sync, 30000).
+
+request(Client, Request, Sync, Timeout) ->
     {ReqOp, ReqBody} = seestar_messages:encode(Request),
-    case gen_server:call(Client, {request, ReqOp, ReqBody, Sync}, infinity) of
+    case gen_server:call(Client, {request, ReqOp, ReqBody, Sync}, Timeout) of
         {RespOp, RespBody} ->
             seestar_messages:decode(RespOp, RespBody);
         Ref ->

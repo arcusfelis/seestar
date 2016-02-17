@@ -199,13 +199,13 @@ decode_unprepared(Data) ->
     {ID, _} = seestar_types:decode_short_bytes(Data),
     #unprepared{id = ID}.
 
-decode_read_failure(Data) ->
+decode_read_failure(_Data) ->
     ok.
 
-decode_function_failure(Data) ->
+decode_function_failure(_Data) ->
     ok.
 
-decode_write_failure(Data) ->
+decode_write_failure(_Data) ->
     ok.
 
 %% -------------------------------------------------------------------------
