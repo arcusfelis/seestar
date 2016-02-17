@@ -27,6 +27,9 @@
 -define(TRUNCATE_ERROR,    16#1003).
 -define(WRITE_TIMEOUT,     16#1100).
 -define(READ_TIMEOUT,      16#1200).
+-define(READ_FAILURE,      16#1300).
+-define(FUNCTION_FAILURE,  16#1400).
+-define(WRITE_FAILURE,     16#1500).
 
 %% 2xx: problem validating the request
 -define(SYNTAX_ERROR,      16#2000).

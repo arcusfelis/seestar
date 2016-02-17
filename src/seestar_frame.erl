@@ -62,7 +62,7 @@ body(Frame) ->
 
 -spec encode(frame()) -> binary().
 encode(#frame{id = ID, flags = Flags, opcode = Op, body = Body}) ->
-    <<16#01, (encode_flags(Flags)), ID/signed, Op, (size(Body)):32, Body/binary>>.
+    <<16#04, (encode_flags(Flags)), ID:16/signed, Op, (size(Body)):32, Body/binary>>.
 
 encode_flags(Flags) ->
     lists:foldl(fun(Flag, Byte) -> encode_flag(Flag) bor Byte end, 0, Flags).
@@ -71,7 +71,7 @@ encode_flag(compression) -> ?COMPRESSION;
 encode_flag(tracing)     -> ?TRACING.
 
 -spec pending_size(binary()) -> pos_integer().
-pending_size(<<16#81, _Flags, _ID/signed, _Op, Size:32, _/binary>>) ->
+pending_size(<<16#84, _Flags, _ID:16/signed, _Op, Size:32, _/binary>>) ->
     Size + 8;
 pending_size(_) ->
     undefined.
@@ -79,7 +79,7 @@ pending_size(_) ->
 -spec decode(binary()) -> {[frame()], binary()}.
 decode(Stream) ->
     decode(Stream, []).
-decode(<<16#81, Flags, ID/signed, Op, Size:32, Body:Size/binary, Rest/binary>>, Acc) ->
+decode(<<16#84, Flags, ID:16/signed, Op, Size:32, Body:Size/binary, Rest/binary>>, Acc) ->
     Frame = #frame{id = ID, flags = decode_flags(Flags), opcode = Op, body = Body},
     decode(Rest, [Frame|Acc]);
 decode(Stream, Acc) ->

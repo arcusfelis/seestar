@@ -82,7 +82,8 @@ encode(#options{}) ->
 
 encode(#'query'{'query' = Query, consistency = Consistency}) ->
     {?QUERY, <<(seestar_types:encode_long_string(Query))/binary,
-               (seestar_types:encode_consistency(Consistency))/binary>>};
+               (seestar_types:encode_consistency(Consistency))/binary,
+               0>>}; % flags v4
 
 encode(#prepare{'query' = Query}) ->
     {?PREPARE, seestar_types:encode_long_string(Query)};
@@ -91,9 +92,11 @@ encode(#execute{id = ID, types = Types, values = Values, consistency = Consisten
     Variables = [ seestar_cqltypes:encode_value_with_size(Type, Value) ||
                   {Type, Value} <- lists:zip(Types, Values) ],
     {?EXECUTE, list_to_binary([seestar_types:encode_short_bytes(ID),
+                               seestar_types:encode_consistency(Consistency),
+                               % flags v4 with values (1)
+                               1,
                                seestar_types:encode_short(length(Variables)),
-                               Variables,
-                               seestar_types:encode_consistency(Consistency)])};
+                               Variables])};
 
 encode(#register{event_types = Types}) ->
     % assert validity of event types.
@@ -118,6 +121,9 @@ decode(?ERROR, Body) ->
                          ?READ_TIMEOUT   -> decode_read_timeout(Rest1);
                          ?ALREADY_EXISTS -> decode_already_exists(Rest1);
                          ?UNPREPARED     -> decode_unprepared(Rest1);
+                         ?READ_FAILURE   -> decode_read_failure(Rest1);
+                         ?FUNCTION_FAILURE -> decode_function_failure(Rest1);
+                         ?WRITE_FAILURE  -> decode_write_failure(Rest1);
                          _               -> undefined
                      end};
 
@@ -193,6 +199,15 @@ decode_unprepared(Data) ->
     {ID, _} = seestar_types:decode_short_bytes(Data),
     #unprepared{id = ID}.
 
+decode_read_failure(Data) ->
+    ok.
+
+decode_function_failure(Data) ->
+    ok.
+
+decode_write_failure(Data) ->
+    ok.
+
 %% -------------------------------------------------------------------------
 %% different result types
 %% -------------------------------------------------------------------------
@@ -223,11 +238,23 @@ decode_row([#column{type = Type}|Meta], Data, Row) ->
 decode_metadata(Data) ->
     {Flags, Rest0} = seestar_types:decode_int(Data),
     {Count, Rest1} = seestar_types:decode_int(Rest0),
-    {TableSpec, Rest2} = case Flags of
-                             16#00 -> {undefined, Rest1};
-                             16#01 -> decode_table_spec(Rest1)
+    Global_table_spec = Flags band 16#01,
+    Has_more_pages    = Flags band 16#02,
+    No_metadata       = Flags band 16#04,
+    {_PagingState, Rest2} = case Has_more_pages of
+                               0 -> {undefined, Rest1};
+                               1 -> seestar_types:decode_string(Rest1)
+                           end,
+    {TableSpec, Rest3} = case {Global_table_spec, No_metadata} of
+                             {1, 0} -> decode_table_spec(Rest2);
+                             _ -> {undefined, Rest2}
                          end,
-    decode_column_specs(TableSpec, Rest2, Count).
+    case No_metadata of
+        0 ->
+            decode_column_specs(TableSpec, Rest3, Count);
+        1 ->
+            {[], Rest3}
+    end.
 
 decode_column_specs(TableSpec, Data, Count) ->
     decode_column_specs(TableSpec, Data, Count, []).
