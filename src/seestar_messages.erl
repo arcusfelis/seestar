@@ -15,7 +15,7 @@
 %%% @private
 -module(seestar_messages).
 
--export([encode/1, decode/2]).
+-export([encode/2, decode/3]).
 
 -include("constants.hrl").
 -include("seestar_messages.hrl").
@@ -63,8 +63,8 @@
 %% encoding functions
 %% -------------------------------------------------------------------------
 
--spec encode(outgoing()) -> {seestar_frame:opcode(), binary()}.
-encode(#startup{version = Version, compression = Compression}) ->
+-spec encode(integer(), outgoing()) -> {seestar_frame:opcode(), binary()}.
+encode(_, #startup{version = Version, compression = Compression}) ->
     KVPairs =
         case Compression of
             undefined ->
@@ -74,21 +74,21 @@ encode(#startup{version = Version, compression = Compression}) ->
         end,
     {?STARTUP, seestar_types:encode_string_map(KVPairs)};
 
-encode(#credentials{credentials = KVPairs}) ->
+encode(_, #credentials{credentials = KVPairs}) ->
     {?CREDENTIALS, seestar_types:encode_string_map(KVPairs)};
 
-encode(#options{}) ->
+encode(_, #options{}) ->
     {?OPTIONS, <<>>};
 
-encode(#'query'{'query' = Query, consistency = Consistency}) ->
+encode(_, #'query'{'query' = Query, consistency = Consistency}) ->
     {?QUERY, <<(seestar_types:encode_long_string(Query))/binary,
                (seestar_types:encode_consistency(Consistency))/binary,
                0>>}; % flags v4
 
-encode(#prepare{'query' = Query}) ->
+encode(_, #prepare{'query' = Query}) ->
     {?PREPARE, seestar_types:encode_long_string(Query)};
 
-encode(#execute{id = ID, types = Types, values = Values, consistency = Consistency}) ->
+encode(_, #execute{id = ID, types = Types, values = Values, consistency = Consistency}) ->
     Variables = [ seestar_cqltypes:encode_value_with_size(Type, Value) ||
                   {Type, Value} <- lists:zip(Types, Values) ],
     {?EXECUTE, list_to_binary([seestar_types:encode_short_bytes(ID),
@@ -98,7 +98,7 @@ encode(#execute{id = ID, types = Types, values = Values, consistency = Consisten
                                seestar_types:encode_short(length(Variables)),
                                Variables])};
 
-encode(#register{event_types = Types}) ->
+encode(_, #register{event_types = Types}) ->
     % assert validity of event types.
     Unique = lists:usort(Types),
     [] = Unique -- [topology_change, status_change, schema_change],
@@ -109,8 +109,8 @@ encode(#register{event_types = Types}) ->
 %% decoding functions
 %% -------------------------------------------------------------------------
 
--spec decode(seestar_frame:opcode(), binary()) -> incoming().
-decode(?ERROR, Body) ->
+-spec decode(integer(), seestar_frame:opcode(), binary()) -> incoming().
+decode(_, ?ERROR, Body) ->
     {Code, Rest0} = seestar_types:decode_int(Body),
     {Message, Rest1} = seestar_types:decode_string(Rest0),
     #error{code = Code,
@@ -127,19 +127,19 @@ decode(?ERROR, Body) ->
                          _               -> undefined
                      end};
 
-decode(?READY, _Body) ->
+decode(_, ?READY, _Body) ->
     #ready{};
 
-decode(?AUTHENTICATE, Body) ->
+decode(_, ?AUTHENTICATE, Body) ->
     {Class, _} = seestar_types:decode_string(Body),
     #authenticate{class = Class};
 
-decode(?SUPPORTED, Body) ->
+decode(_, ?SUPPORTED, Body) ->
     {KVPairs, _} = seestar_types:decode_string_multimap(Body),
     #supported{versions = proplists:get_value(?VERSION, KVPairs),
                compression = proplists:get_value(?COMPRESSION, KVPairs)};
 
-decode(?EVENT, Body) ->
+decode(_, ?EVENT, Body) ->
     {EventType, Rest} = seestar_types:decode_string(Body),
     #event{event = case EventType of
                        ?TOPOLOGY_CHANGE -> decode_topology_change(Rest);
@@ -147,7 +147,7 @@ decode(?EVENT, Body) ->
                        ?SCHEMA_CHANGE -> decode_schema_change(Rest)
                    end};
 
-decode(?RESULT, Body) ->
+decode(_, ?RESULT, Body) ->
     {Kind, Rest} = seestar_types:decode_int(Body),
     #result{result = case Kind of
                          16#01 -> void;

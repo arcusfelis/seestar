@@ -41,6 +41,9 @@
 
 -type 'query'() :: binary() | string().
 -type query_id() :: binary().
+-type protocol_version() :: 3 | 4.
+-record(client_handle, {pid, proto}).
+-type client() :: #client_handle{pid :: pid(), proto :: protocol_version()}.
 
 -define(b2l(Term), case is_binary(Term) of true -> binary_to_list(Term); false -> Term end).
 -define(l2b(Term), case is_list(Term) of true -> list_to_binary(Term); false -> Term end).
@@ -54,6 +57,7 @@
 -record(st,
         {host :: host(),
          transport :: tcp | ssl,
+         proto :: protocol_version(),
          sock :: inet:socket() | ssl:sslsocket(),
          buffer :: seestar_buffer:buffer(),
          free_ids :: [seestar_frame:stream_id()],
@@ -83,66 +87,76 @@ start_link(Host, Port, ClientOptions) ->
 %% {ssl, [ssl_option()]} in the ConnectOptions
 %% @end
 -spec start_link(host(), inet:port_number(), [client_option()], [connect_option()]) ->
-    {ok, pid()} | {error, any()}.
+    {ok, pid(), client()} | {error, any()}.
 start_link(Host, Port, ClientOptions, ConnectOptions) ->
      case gen_server:start_link(?MODULE, [Host, Port, ConnectOptions], []) of
         {ok, Pid} ->
-            case setup(Pid, ClientOptions, 2000) of
-                ok    -> {ok, Pid};
-                Error -> stop(Pid), Error
+            Client4 = #client_handle{pid=Pid, proto=4},
+            Client3 = #client_handle{pid=Pid, proto=3},
+            case setup(Client4, ClientOptions, 2000) of
+                ok    -> {ok, Pid, Client4};
+                Error ->
+                    case setup(Client3, ClientOptions, 2000) of
+                        ok    -> {ok, Pid, Client3};
+                        Error -> stop(Pid), Error
+                    end
             end;
         Error ->
             Error
     end.
 
-setup(Pid, Options, Timeout) ->
-    case authenticate(Pid, Options, Timeout) of
+setup(Client, Options, Timeout) ->
+    set_protocol_version(Client),
+    case authenticate(Client, Options, Timeout) of
         false ->
             {error, invalid_credentials};
         true ->
-            case set_keyspace(Pid, Options) of
+            case set_keyspace(Client, Options) of
                 false ->
                     {error, invalid_keyspace};
                 true ->
-                    case subscribe(Pid, Options) of
+                    case subscribe(Client, Options) of
                         false -> {error, invalid_events};
                         true  -> ok
                     end
             end
     end.
 
-authenticate(Pid, Options, Timeout) ->
+set_protocol_version(#client_handle{pid=Pid, proto=ProtoVsn}) ->
+    gen_server:cast(Pid, {set_protocol_version, ProtoVsn}).
+
+authenticate(Client, Options, Timeout) ->
     Credentials = proplists:get_value(credentials, Options),
-    case request(Pid, #startup{}, true, Timeout) of
+    case request(Client, #startup{}, true, Timeout) of
         #ready{} ->
             true;
         #authenticate{} when Credentials =:= undefined ->
             false;
         #authenticate{} ->
             KVPairs = [ {?l2b(K), ?l2b(V)} || {K, V} <- Credentials ],
-            case request(Pid, #credentials{credentials = KVPairs}, true, Timeout) of
+            case request(Client, #credentials{credentials = KVPairs}, true, Timeout) of
                 #ready{} -> true;
                 #error{} -> false
             end
     end.
 
-set_keyspace(Pid, Options) ->
+set_keyspace(Client, Options) ->
     case proplists:get_value(keyspace, Options) of
         undefined ->
             true;
         Keyspace ->
-            case perform(Pid, "USE " ++ ?b2l(Keyspace), one) of
+            case perform(Client, "USE " ++ ?b2l(Keyspace), one) of
                 {ok, _Result}    -> true;
                 {error, _Reason} -> false
             end
     end.
 
-subscribe(Pid, Options) ->
+subscribe(Client, Options) ->
     case proplists:get_value(events, Options, []) of
         [] ->
             true;
         Events ->
-            case request(Pid, #register{event_types = Events}, true) of
+            case request(Client, #register{event_types = Events}, true) of
                 #ready{} -> true;
                 #error{} -> false
             end
@@ -156,9 +170,11 @@ set_event_listener(Client, Listener) ->
 
 %% @doc Stop the client.
 %% Closes the socket and terminates the process normally.
--spec stop(pid()) -> ok.
-stop(Client) ->
-    gen_server:cast(Client, stop).
+-spec stop(client()|pid()) -> ok.
+stop(#client_handle{pid=Pid}) ->
+    stop(Pid);
+stop(Pid) ->
+    gen_server:cast(Pid, stop).
 
 %% @doc Synchoronously perform a CQL query using the specified consistency level.
 %% Returns a result of an appropriate type (void, rows, set_keyspace, schema_change).
@@ -219,11 +235,11 @@ execute_async(Client, QueryID, Types, Values, Consistency) ->
 request(Client, Request, Sync) ->
     request(Client, Request, Sync, 30000).
 
-request(Client, Request, Sync, Timeout) ->
-    {ReqOp, ReqBody} = seestar_messages:encode(Request),
-    case gen_server:call(Client, {request, ReqOp, ReqBody, Sync}, Timeout) of
+request(#client_handle{pid=Pid, proto=ProtoVsn}, Request, Sync, Timeout) ->
+    {ReqOp, ReqBody} = seestar_messages:encode(ProtoVsn, Request),
+    case gen_server:call(Pid, {request, ReqOp, ReqBody, Sync}, Timeout) of
         {RespOp, RespBody} ->
-            seestar_messages:decode(RespOp, RespBody);
+            seestar_messages:decode(ProtoVsn, RespOp, RespBody);
         Ref ->
             Ref
     end.
@@ -327,6 +343,8 @@ handle_cast(stop, #st{sock = Sock, transport = ssl} = St) ->
 handle_cast({event_listener, Listener}, St) ->
     {noreply, St#st{event_listener = Listener}};
 
+handle_cast({set_protocol_version, ProtoVsn}, St) ->
+    {noreply, St#st{proto=ProtoVsn}};
 handle_cast(Request, St) ->
     {stop, {unexpected_cast, Request}, St}.
 
@@ -361,11 +379,11 @@ process_frames([], St) ->
 
 handle_event(_Frame, #st{event_listener = undefined} = St) ->
     St;
-handle_event(Frame, #st{event_listener = Pid} = St) ->
+handle_event(Frame, #st{event_listener = Pid, proto=ProtoVsn} = St) ->
     Op = seestar_frame:opcode(Frame),
     Body = seestar_frame:body(Frame),
     F = fun() ->
-            case seestar_messages:decode(Op, Body) of
+            case seestar_messages:decode(ProtoVsn, Op, Body) of
                 #event{event = Event} ->
                     {ok, Event};
                 #error{} = Error ->
@@ -383,13 +401,13 @@ handle_response(Frame, St) ->
     Body = seestar_frame:body(Frame),
     case Sync of
         true  -> gen_server:reply(From, {Op, Body});
-        false -> reply_async(From, Op, Body)
+        false -> reply_async(St#st.proto, From, Op, Body)
     end,
     St#st{free_ids = [ID|St#st.free_ids]}.
 
-reply_async({Pid, Ref}, Op, Body) ->
+reply_async(ProtoVsn, {Pid, Ref}, Op, Body) ->
     F = fun() ->
-            case seestar_messages:decode(Op, Body) of
+            case seestar_messages:decode(ProtoVsn, Op, Body) of
                 #result{result = Result} ->
                     {ok, Result};
                 #error{} = Error ->
