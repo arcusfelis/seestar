@@ -5,7 +5,7 @@ sudo: required
 # Docker runs on Trusty planform (the new one)
 install:
     - docker run -d --net=host -e MAX_HEAP_SIZE=128M -e HEAP_NEWSIZE=64M --name=cassandra cassandra:${CASSANDRA_VERSION}
-    - ./wait_for_cassandra.sh
+    - ./wait_for_cassandra.sh || docker logs cassandra
 script:
     - ./rebar skip_deps=true eunit -v
 
