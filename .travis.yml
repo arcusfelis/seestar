@@ -6,7 +6,6 @@ sudo: required
 install:
     - docker run -d --net=host -e MAX_HEAP_SIZE=128M -e HEAP_NEWSIZE=64M --name=cassandra cassandra:${CASSANDRA_VERSION}
 script:
-    - ./rebar skip_deps=true compile
     - ./rebar skip_deps=true eunit -v
 
 services:
