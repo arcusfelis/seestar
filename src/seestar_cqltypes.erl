@@ -254,8 +254,23 @@ decode_type(Data) ->
             {{map, KeyType, ValueType}, Rest2};
         16#22 ->
             {Subtype, Rest1} = decode_type(Rest0),
-            {{set, Subtype}, Rest1}
+            {{set, Subtype}, Rest1};
+        16#30 ->
+            erlang:error({todo, udt});
+        16#31 ->
+            {N, Rest1} = seestar_types:decode_short(Rest0),
+            {Types, Rest2} = decode_types(N, Rest1),
+            {{type, Types}, Rest2}
     end.
+
+decode_types(N, Data) ->
+    decode_types(N, Data, []).
+
+decode_types(0, Data, Types) ->
+    {lists:reverse(Types), Data};
+decode_types(N, Data, Types) when N > 0 ->
+    {Type, Rest0} = decode_type(Data),
+    decode_types(N-1, Rest0, [Type|Types]).
 
 code_to_type(16#01) -> ascii;
 code_to_type(16#02) -> bigint;
@@ -272,4 +287,8 @@ code_to_type(16#0C) -> uuid;
 code_to_type(16#0D) -> varchar;
 code_to_type(16#0E) -> varint;
 code_to_type(16#0F) -> timeuuid;
-code_to_type(16#10) -> inet.
+code_to_type(16#10) -> inet;
+code_to_type(16#11) -> date;
+code_to_type(16#12) -> time;
+code_to_type(16#13) -> smallint;
+code_to_type(16#14) -> tinyint.

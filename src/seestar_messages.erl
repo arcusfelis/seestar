@@ -147,13 +147,13 @@ decode(_, ?EVENT, Body) ->
                        ?SCHEMA_CHANGE -> decode_schema_change(Rest)
                    end};
 
-decode(_, ?RESULT, Body) ->
+decode(Proto, ?RESULT, Body) ->
     {Kind, Rest} = seestar_types:decode_int(Body),
     #result{result = case Kind of
                          16#01 -> void;
                          16#02 -> decode_rows(Rest);
                          16#03 -> decode_set_keyspace(Rest);
-                         16#04 -> decode_prepared(Rest);
+                         16#04 -> decode_prepared(Proto, Rest);
                          16#05 -> decode_schema_change(Rest)
                      end}.
 
@@ -235,6 +235,29 @@ decode_row([#column{type = Type}|Meta], Data, Row) ->
     {Value, Rest} = seestar_cqltypes:decode_value_with_size(Type, Data),
     decode_row(Meta, Rest, [Value|Row]).
 
+decode_metadata_pk(Data) ->
+    {Flags, Rest0} = seestar_types:decode_int(Data),
+    {Count, Rest1} = seestar_types:decode_int(Rest0),
+    {PkCount, Rest2} = seestar_types:decode_int(Rest1),
+    {_PkIndexes, Rest3} = decode_shorts(PkCount, Rest2),
+    Global_table_spec = Flags band 16#01,
+    Has_more_pages    = Flags band 16#02,
+    No_metadata       = Flags band 16#04,
+    {_PagingState, Rest4} = case Has_more_pages of
+                               0 -> {undefined, Rest3};
+                               1 -> seestar_types:decode_string(Rest3)
+                           end,
+    {TableSpec, Rest5} = case {Global_table_spec, No_metadata} of
+                             {1, 0} -> decode_table_spec(Rest4);
+                             _ -> {undefined, Rest4}
+                         end,
+    case No_metadata of
+        0 ->
+            decode_column_specs(TableSpec, Rest5, Count);
+        1 ->
+            {[], Rest5}
+    end.
+
 decode_metadata(Data) ->
     {Flags, Rest0} = seestar_types:decode_int(Data),
     {Count, Rest1} = seestar_types:decode_int(Rest0),
@@ -292,13 +315,27 @@ decode_target_options(<<"TABLE">>, Rest0) ->
 decode_target_options(<<"TYPE">>, Rest0) ->
     {Keyspace, Rest1} = seestar_types:decode_string(Rest0),
     {TypeName, Rest2} = seestar_types:decode_string(Rest1),
-    {{Keyspace, TypeName}, Rest2}.
+    {{Keyspace, TypeName}, Rest2};
+decode_target_options(<<"FUNCTION">>, Rest0) ->
+    {Keyspace, Rest1} = seestar_types:decode_string(Rest0),
+    {Name, Rest2} = seestar_types:decode_string(Rest1),
+    {Types, Rest3} = seestar_types:decode_string_list(Rest2),
+    {{Keyspace, Name, Types}, Rest3};
+decode_target_options(<<"AGGREGATE">>, Rest0) ->
+    {Keyspace, Rest1} = seestar_types:decode_string(Rest0),
+    {Name, Rest2} = seestar_types:decode_string(Rest1),
+    {Types, Rest3} = seestar_types:decode_string_list(Rest2),
+    {{Keyspace, Name, Types}, Rest3}.
 
 decode_set_keyspace(Body) ->
     {Keyspace, _} = seestar_types:decode_string(Body),
     #set_keyspace{keyspace = Keyspace}.
 
-decode_prepared(Body) ->
+decode_prepared(4, Body) ->
+    {ID, Rest} = seestar_types:decode_short_bytes(Body),
+    {Meta, _} = decode_metadata_pk(Rest),
+    #prepared{id = ID, metadata = Meta};
+decode_prepared(3, Body) ->
     {ID, Rest} = seestar_types:decode_short_bytes(Body),
     {Meta, _} = decode_metadata(Rest),
     #prepared{id = ID, metadata = Meta}.
@@ -326,3 +363,12 @@ decode_schema_change(Body) ->
                                <<>> -> undefined;
                                _    -> Table
                            end}.
+
+decode_shorts(N, Data) ->
+    decode_shorts(N, Data, []).
+
+decode_shorts(0, Data, Shorts) ->
+    {lists:reverse(Shorts), Data};
+decode_shorts(N, Data, Shorts) when N > 0 ->
+    {Short, Rest0} = seestar_types:decode_short(Data),
+    decode_shorts(N-1, Rest0, [Short|Shorts]).
