@@ -274,9 +274,25 @@ decode_column_spec({Keyspace, Table}, Data) ->
     {#column{keyspace = Keyspace, table = Table, name = Name, type = Type}, Rest1}.
 
 decode_table_spec(Data) ->
-    {Keyspace, Rest0} = seestar_types:decode_string(Data),
-    {Table, Rest1} = seestar_types:decode_string(Rest0),
-    {{Keyspace, Table}, Rest1}.
+    {Keyspace, Rest1} = seestar_types:decode_string(Data),
+    {TableName, Rest2} = seestar_types:decode_string(Rest1),
+    {{Keyspace, TableName}, Rest2}.
+
+decode_target(Data) ->
+    {Target, Rest0} = seestar_types:decode_string(Data),
+    decode_target_options(Target, Rest0).
+
+decode_target_options(<<"KEYSPACE">>, Rest0) ->
+    {Keyspace, Rest1} = seestar_types:decode_string(Rest0),
+    {{Keyspace, undefined}, Rest1};
+decode_target_options(<<"TABLE">>, Rest0) ->
+    {Keyspace, Rest1} = seestar_types:decode_string(Rest0),
+    {TableName, Rest2} = seestar_types:decode_string(Rest1),
+    {{Keyspace, TableName}, Rest2};
+decode_target_options(<<"TYPE">>, Rest0) ->
+    {Keyspace, Rest1} = seestar_types:decode_string(Rest0),
+    {TypeName, Rest2} = seestar_types:decode_string(Rest1),
+    {{Keyspace, TypeName}, Rest2}.
 
 decode_set_keyspace(Body) ->
     {Keyspace, _} = seestar_types:decode_string(Body),
@@ -303,7 +319,7 @@ decode_status_change(Body) ->
 
 decode_schema_change(Body) ->
     {Change, Rest} = seestar_types:decode_string(Body),
-    {{Keyspace, Table}, _} = decode_table_spec(Rest),
+    {{Keyspace, Table}, _} = decode_target(Rest),
     #schema_change{change = list_to_atom(string:to_lower(binary_to_list(Change))),
                    keyspace = Keyspace,
                    table = case Table of

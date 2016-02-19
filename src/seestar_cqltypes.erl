@@ -101,36 +101,36 @@ decode_value(_Type, Bytes) ->
 %% -------------------------------------------------------------------------
 
 decode_list(Type, Data) ->
-    {Length, Rest} = seestar_types:decode_short(Data),
+    {Length, Rest} = seestar_types:decode_int(Data),
     decode_list(Type, Length, Rest, []).
 
 decode_list(_, 0, _, List) ->
     lists:reverse(List);
 decode_list(Type, Length, Data, List) ->
-    {Bytes, Rest} = seestar_types:decode_short_bytes(Data),
+    {Bytes, Rest} = seestar_types:decode_bytes(Data),
     decode_list(Type, Length - 1, Rest, [decode_value(Type, Bytes)|List]).
 
 decode_map(KeyType, ValueType, Data) ->
-    {Size, Rest} = seestar_types:decode_short(Data),
+    {Size, Rest} = seestar_types:decode_int(Data),
     decode_map(KeyType, ValueType, Size, Rest, dict:new()).
 
 decode_map(_, _, 0, _, Dict) ->
     Dict;
 decode_map(KeyType, ValueType, Size, Data, Dict) ->
-    {KeyBytes, Rest0} = seestar_types:decode_short_bytes(Data),
-    {ValueBytes, Rest1} = seestar_types:decode_short_bytes(Rest0),
+    {KeyBytes, Rest0} = seestar_types:decode_bytes(Data),
+    {ValueBytes, Rest1} = seestar_types:decode_bytes(Rest0),
     Key = decode_value(KeyType, KeyBytes),
     Value = decode_value(ValueType, ValueBytes),
     decode_map(KeyType, ValueType, Size - 1, Rest1, dict:store(Key, Value, Dict)).
 
 decode_set(Type, Data) ->
-    {Size, Rest} = seestar_types:decode_short(Data),
+    {Size, Rest} = seestar_types:decode_int(Data),
     decode_set(Type, Size, Rest, sets:new()).
 
 decode_set(_, 0, _, Set) ->
     Set;
 decode_set(Type, Size, Data, Set) ->
-    {Bytes, Rest} = seestar_types:decode_short_bytes(Data),
+    {Bytes, Rest} = seestar_types:decode_bytes(Data),
     decode_set(Type, Size - 1, Rest, sets:add_element(decode_value(Type, Bytes), Set)).
 
 %% -------------------------------------------------------------------------
@@ -212,23 +212,23 @@ encode_varint_neg(X, Ds) ->
 %% -------------------------------------------------------------------------
 
 encode_list(Type, List) ->
-    Encoded = [ seestar_types:encode_short_bytes(encode_value(Type, V)) || V <- List ],
-    <<(seestar_types:encode_short(length(List)))/binary,
+    Encoded = [ seestar_types:encode_bytes(encode_value(Type, V)) || V <- List ],
+    <<(seestar_types:encode_int(length(List)))/binary,
       (list_to_binary(Encoded))/binary>>.
 
 encode_set(Type, Set) ->
     Encoded = sets:fold(fun(V, Acc) ->
-                            [seestar_types:encode_short_bytes(encode_value(Type, V))|Acc]
+                            [seestar_types:encode_bytes(encode_value(Type, V))|Acc]
                         end, [], Set),
-    <<(seestar_types:encode_short(sets:size(Set)))/binary,
+    <<(seestar_types:encode_int(sets:size(Set)))/binary,
       (list_to_binary(Encoded))/binary>>.
 
 encode_map(KeyType, ValueType, Dict) ->
     F = fun(K, V, Acc) ->
-            [<<(seestar_types:encode_short_bytes(encode_value(KeyType, K)))/binary,
-               (seestar_types:encode_short_bytes(encode_value(ValueType, V)))/binary>>|Acc]
+            [<<(seestar_types:encode_bytes(encode_value(KeyType, K)))/binary,
+               (seestar_types:encode_bytes(encode_value(ValueType, V)))/binary>>|Acc]
          end,
-    <<(seestar_types:encode_short(dict:size(Dict)))/binary,
+    <<(seestar_types:encode_int(dict:size(Dict)))/binary,
       (list_to_binary(dict:fold(F, [], Dict)))/binary>>.
 
 %% -------------------------------------------------------------------------

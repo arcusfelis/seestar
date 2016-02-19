@@ -11,6 +11,8 @@ session_test_() ->
          timer:sleep(500),
          {ok, Pid, Client} = seestar_session:start_link("localhost", 9042),
          unlink(Pid),
+         QryDrop = "DROP KEYSPACE seestar;",
+         seestar_session:perform(Client, QryDrop, one),
          Client
      end,
      fun(Client) ->
@@ -84,12 +86,12 @@ test_native_types(Client) ->
                   inet, int, varchar, timestamp, timeuuid, uuid, varchar, varint],
                  Types),
     Row0 = [<<"abcd">>, 1234567890123456789, <<4,2>>, true, {1995211882, 5},
-            9999999.999, 99999.9921875, {127,0,0,1}, 100, <<"Voilá!">>, {1368,199874,337000},
+            9999999.999, 99999.9921875, {127,0,0,1}, 100, <<"Voila!">>, {1368,199874,337000},
             <<146,135,233,168,39,16,17,187,131,194,96,197,71,12,191,14>>,
             <<113,68,80,223,85,99,74,129,188,158,84,49,50,156,40,232>>,
             <<>>, 10000000000000000000000000],
     Row1 = [<<"cdef">>, 1234567890123456789, <<2,4>>, false, {1995211882, 6}, 9999999.999,
-            99999.9921875, {255,255,255,255,255,255,255,255}, 200, <<"текст">>, {1368,199874,337000},
+            99999.9921875, {255,255,255,255,255,255,255,255}, 200, <<"text">>, {1368,199874,337000},
             <<135,99,103,104,40,81,17,187,181,58,96,197,71,12,191,14>>,
             <<148,125,144,228,220,27,68,12,148,158,178,154,25,169,42,113>>,
             <<>>, 100000000000000000000000000],
@@ -131,12 +133,20 @@ test_collection_types(Client) ->
     QryID = seestar_result:query_id(Res1),
     Types = seestar_result:types(Res1),
     Row0 = [0, null, null, null],
-    Row1 = [1, dict:from_list([{<<"k1">>, <<"v1">>}]), sets:from_list([1]), [true]],
-    Row2 = [2, dict:from_list([{<<"k1">>, <<"v1">>}, {<<"k2">>, <<"v2">>}]), sets:from_list([1,2]), [true, false]],
-    [ {ok, _} = seestar_session:execute(Client, QryID, Types, R, one) || R <- [Row0, Row1, Row2] ],
+    Row1 = [1, dict:from_list([{<<"k1">>, <<"v1">>}]), null, null], % map
+    Row2 = [2, null, sets:from_list([1]), null],                    % set
+    Row3 = [3, null, null, [true]],                                 % list
+    Row4 = [4, dict:from_list([{<<"k1">>, <<"v1">>}]), sets:from_list([1]), [true]],
+    Row5 = [5, dict:from_list([{<<"k1">>, <<"v1">>}, {<<"k2">>, <<"v2">>}]), sets:from_list([1,2]), [true, false]],
+    {ok, _} = seestar_session:execute(Client, QryID, Types, Row0, one),
+    {ok, _} = seestar_session:execute(Client, QryID, Types, Row1, one),
+    {ok, _} = seestar_session:execute(Client, QryID, Types, Row2, one),
+    {ok, _} = seestar_session:execute(Client, QryID, Types, Row3, one),
+    {ok, _} = seestar_session:execute(Client, QryID, Types, Row4, one),
+    {ok, _} = seestar_session:execute(Client, QryID, Types, Row5, one),
     Qry2 = "SELECT id, mapcol, setcol, listcol FROM seestar.has_collection_types",
     {ok, Res2} = seestar_session:perform(Client, Qry2, one),
-    ?assertEqual([Row1, Row0, Row2], seestar_result:rows(Res2)).
+    ?assertEqual([Row0, Row1, Row2, Row3, Row4, Row5], lists:sort(seestar_result:rows(Res2))).
 
 create_keyspace(Client, Name, RF) ->
     Qry = "CREATE KEYSPACE ~s WITH REPLICATION = {'class': 'SimpleStrategy', 'replication_factor': ~w}",
