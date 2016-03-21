@@ -28,6 +28,7 @@
 -define(PREPARE, 16#09).
 -define(EXECUTE, 16#0A).
 -define(REGISTER, 16#0B).
+-define(BATCH, 16#0D).
 %% responses.
 -define(ERROR, 16#00).
 -define(READY, 16#02).
@@ -103,7 +104,28 @@ encode(_, #register{event_types = Types}) ->
     Unique = lists:usort(Types),
     [] = Unique -- [topology_change, status_change, schema_change],
     Encoded = [ list_to_binary(string:to_upper(atom_to_list(Type))) || Type <- Types ],
-    {?REGISTER, seestar_types:encode_string_list(Encoded)}.
+    {?REGISTER, seestar_types:encode_string_list(Encoded)};
+
+encode(_, #batch{type = Type, queries = Queries, consistency = Consistency}) ->
+    TypeInt = encode_batch_type(Type),
+    EncodedQueries = [encode_batch_query(Query) || Query <- Queries],
+    {?BATCH, erlang:iolist_to_binary([TypeInt,
+                  seestar_types:encode_short(length(Queries)),
+                  EncodedQueries,
+                  seestar_types:encode_consistency(Consistency),
+                  0])}. % flags
+
+encode_batch_query(#batch_query{query = Query}) ->
+    <<0, (seestar_types:encode_long_string(Query))/binary>>;
+encode_batch_query(#batch_execute{id = QueryID, types = Types, values = Values}) ->
+    Variables = [ seestar_cqltypes:encode_value_with_size(Type, Value) ||
+                  {Type, Value} <- lists:zip(Types, Values) ],
+    [_Kind=1, seestar_types:encode_short_bytes(QueryID),
+     seestar_types:encode_short(length(Variables)), Variables].
+
+encode_batch_type(logged)       -> 0;
+encode_batch_type(unlogged)     -> 1;
+encode_batch_type(counter)      -> 2.
 
 %% -------------------------------------------------------------------------
 %% decoding functions

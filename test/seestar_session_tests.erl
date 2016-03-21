@@ -22,7 +22,8 @@ session_test_() ->
      [fun(Client) -> {with, Client, [fun test_schema_queries/1]} end,
       fun(Client) -> {with, Client, [fun test_native_types/1]} end,
       fun(Client) -> {with, Client, [fun test_collection_types/1]} end,
-      fun(Client) -> {with, Client, [fun test_counter_type/1]} end]}.
+      fun(Client) -> {with, Client, [fun test_counter_type/1]} end,
+      fun(Client) -> {with, Client, [fun test_batch_queries/1]} end]}.
 
 test_schema_queries(Client) ->
     Qry0 = "CREATE KEYSPACE seestar "
@@ -147,6 +148,28 @@ test_collection_types(Client) ->
     Qry2 = "SELECT id, mapcol, setcol, listcol FROM seestar.has_collection_types",
     {ok, Res2} = seestar_session:perform(Client, Qry2, one),
     ?assertEqual([Row0, Row1, Row2, Row3, Row4, Row5], lists:sort(seestar_result:rows(Res2))).
+
+test_batch_queries(Client) ->
+    create_keyspace(Client, "seestar", 1),
+    Qry0 = "CREATE TABLE seestar.user (
+                name varchar,
+                password varchar,
+                PRIMARY KEY(name)
+            )",
+    {ok, _} = seestar_session:perform(Client, Qry0, one),
+    Qry1 = "INSERT INTO seestar.user (name, password) VALUES (?, ?)",
+    {ok, Res1} = seestar_session:prepare(Client, Qry1),
+    QryID = seestar_result:query_id(Res1),
+    Types = seestar_result:types(Res1),
+    Row1 = [<<"alice">>, <<"secret">>],
+    Row2 = [<<"bob">>, <<"123456">>],
+    B1 = seestar_session:new_batch_execute(QryID, Types, Row1),
+    B2 = seestar_session:new_batch_execute(QryID, Types, Row2),
+    {ok, _} = seestar_session:batch(Client, logged, [B1, B2], one),
+    Qry2 = "SELECT name, password FROM seestar.user",
+    {ok, Res3} = seestar_session:perform(Client, Qry2, one),
+    ?assertEqual([Row1, Row2], lists:sort(seestar_result:rows(Res3))).
+
 
 create_keyspace(Client, Name, RF) ->
     Qry = "CREATE KEYSPACE ~s WITH REPLICATION = {'class': 'SimpleStrategy', 'replication_factor': ~w}",

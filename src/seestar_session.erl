@@ -25,6 +25,8 @@
 -export([set_event_listener/2]).
 -export([perform/3, perform_async/3]).
 -export([prepare/2, execute/5, execute_async/5]).
+-export([new_batch_query/1, new_batch_execute/3]).
+-export([batch/4, batch_async/4]).
 
 %% gen_server exports.
 -export([init/1, terminate/2, handle_call/3, handle_cast/2, handle_info/2,
@@ -239,6 +241,25 @@ execute(Client, QueryID, Types, Values, Consistency) ->
 
 execute_async(Client, QueryID, Types, Values, Consistency) ->
     Req = #execute{id = QueryID, types = Types, values = Values, consistency = Consistency},
+    request(Client, Req, false).
+
+new_batch_query(Query) ->
+    #batch_query{query = Query}.
+
+new_batch_execute(QueryID, Types, Values) ->
+    #batch_execute{id=QueryID, types=Types, values=Values}.
+
+batch(Client, Type, Queries, Consistency) ->
+    Req = #batch{type = Type, queries = Queries, consistency = Consistency},
+    case request(Client, Req, true) of
+        #result{result = Result} ->
+            {ok, Result};
+        #error{} = Error ->
+            {error, Error}
+    end.
+
+batch_async(Client, Type, Queries, Consistency) ->
+    Req = #batch{type = Type, queries = Queries, consistency = Consistency},
     request(Client, Req, false).
 
 request(Client, Request, Sync) ->

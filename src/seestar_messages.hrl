@@ -37,6 +37,19 @@
          variables :: [binary()],
          consistency = one :: atom()}).
 
+-record(batch_query,
+        {query :: binary()}).
+
+-record(batch_execute,
+        {id :: binary(),
+         types = [] :: [seestar_cqltypes:type()],
+         values = [] :: [seestar_cqltypes:value()]}).
+
+-record(batch,
+        {type :: logged | unlogged | counter,
+         queries :: [#batch_query{} | #batch_execute{}],
+         consistency = one :: atom()}).
+
 -record(register,
         {event_types = [] :: [topology_change | status_change | schema_change]}).
 
