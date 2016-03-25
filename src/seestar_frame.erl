@@ -16,7 +16,7 @@
 -module(seestar_frame).
 
 -export([new/5, id/1, flags/1, has_flag/2, opcode/1,
-         body/1, encode/1, pending_size/1, decode/1]).
+         body/1, warnings/1, encode/1, pending_size/1, decode/1]).
 
 -type stream_id() :: -1..127.
 -type flag() :: compression | tracing.
@@ -25,6 +25,7 @@
 
 -define(COMPRESSION, 16#01).
 -define(TRACING, 16#02).
+-define(WARNING, 16#08).
 
 -define(REQ_VSN3,  16#03).
 -define(RESP_VSN3, 16#83).
@@ -35,7 +36,8 @@
                 id :: stream_id(),
                 flags = [] :: [flag()],
                 opcode :: opcode(),
-                body :: binary()}).
+                body :: binary(),
+                warnings = [] :: [binary()]}).
 -opaque frame() :: #frame{}.
 
 %% -------------------------------------------------------------------------
@@ -66,6 +68,10 @@ opcode(Frame) ->
 body(Frame) ->
     Frame#frame.body.
 
+-spec warnings(frame()) -> list(binary()).
+warnings(Frame) ->
+    Frame#frame.warnings.
+
 -spec encode(frame()) -> binary().
 encode(#frame{proto=ProtoVsn, id = ID, flags = Flags, opcode = Op, body = Body}) ->
     <<ProtoVsn, (encode_flags(Flags)), ID:16/signed, Op, (size(Body)):32, Body/binary>>.
@@ -87,7 +93,8 @@ decode(Stream) ->
     assert_protocol_version(Stream),
     decode(Stream, []).
 decode(<<_ProtoVsn, Flags, ID:16/signed, Op, Size:32, Body:Size/binary, Rest/binary>>, Acc) ->
-    Frame = #frame{id = ID, flags = decode_flags(Flags), opcode = Op, body = Body},
+    {Warnings, Body2} = maybe_decode_warning(Flags, Body),
+    Frame = #frame{id = ID, flags = decode_flags(Flags), opcode = Op, body = Body2, warnings = Warnings},
     decode(Rest, [Frame|Acc]);
 decode(Stream, Acc) ->
     {lists:reverse(Acc), Stream}.
@@ -96,13 +103,20 @@ assert_protocol_version(<<?RESP_VSN3, _/binary>>) -> ok;
 assert_protocol_version(<<?RESP_VSN4, _/binary>>) -> ok;
 assert_protocol_version(<<>>)                     -> ok.
 
+maybe_decode_warning(Flags, Body) when Flags band ?WARNING =:= ?WARNING ->
+    %% Warning flag set
+    seestar_types:decode_string_list(Body);
+maybe_decode_warning(_Flags, Body) ->
+    {[], Body}.
+
 decode_flags(Byte) ->
     F = fun(Mask, Flags) when Byte band Mask =:= Mask ->
             [decode_flag(Mask)|Flags];
            (_Mask, Flags) ->
             Flags
         end,
-    lists:foldl(F, [], [?COMPRESSION, ?TRACING]).
+    lists:foldl(F, [], [?COMPRESSION, ?TRACING, ?WARNING]).
 
 decode_flag(?COMPRESSION) -> compression;
-decode_flag(?TRACING)     -> tracing.
+decode_flag(?TRACING)     -> tracing;
+decode_flag(?WARNING)     -> warning.

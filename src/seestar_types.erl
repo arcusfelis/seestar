@@ -20,6 +20,7 @@
          encode_consistency/1, encode_string_map/1]).
 -export([decode_int/1, decode_short/1, decode_byte/1, decode_string/1, decode_uuid/1,
          decode_bytes/1, decode_short_bytes/1, decode_consistency/1,
+         decode_string_list/1,
          decode_string_multimap/1, decode_inet/1]).
 
 %% -------------------------------------------------------------------------

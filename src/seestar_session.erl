@@ -400,6 +400,7 @@ handle_info(Info, St) ->
     {stop, {unexpected_info, Info}, St}.
 
 process_frames([Frame|Frames], St) ->
+    print_warnings(Frame),
     process_frames(Frames,
                    case seestar_frame:id(Frame) of
                        -1 -> handle_event(Frame, St);
@@ -467,3 +468,11 @@ process_backlog(#st{backlog = Backlog, free_ids = FreeIDs} = St) ->
 %% @private
 code_change(_OldVsn, St, _Extra) ->
     {ok, St}.
+
+print_warnings(Frame) ->
+    Warnings = seestar_frame:warnings(Frame),
+    [print_warning(Frame, Warning) || Warning <- Warnings].
+
+print_warning(Frame, Warning) ->
+    error_logger:warning_msg("issue=cassandra_warning, warning=~p, frame=~p",
+                             [binary_to_list(Warning), Frame]).

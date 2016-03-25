@@ -166,6 +166,7 @@ test_batch_queries(Client) ->
     B1 = seestar_session:new_batch_execute(QryID, Types, Row1),
     B2 = seestar_session:new_batch_execute(QryID, Types, Row2),
     {ok, _} = seestar_session:batch(Client, logged, [B1, B2], one),
+    {ok, _} = seestar_session:batch(Client, unlogged, [B1, B2], one),
     Qry2 = "SELECT name, password FROM seestar.user",
     {ok, Res3} = seestar_session:perform(Client, Qry2, one),
     ?assertEqual([Row1, Row2], lists:sort(seestar_result:rows(Res3))).
