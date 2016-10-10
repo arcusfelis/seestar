@@ -5,5 +5,5 @@
 -else.
     -type dict_t() :: dict:dict().
     -type queue_t() :: queue:queue().
-    -type set_t() :: set:set().
+    -type set_t() :: sets:set().
 -endif.
