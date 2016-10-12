@@ -48,7 +48,10 @@
                   | #'query'{}
                   | #prepare{}
                   | #execute{}
-                  | #register{}.
+                  | #register{}
+                  | #batch{}
+                  | #batch_query{}
+                  | #batch_execute{}.
 
 -type incoming() :: #error{}
                   | #ready{}

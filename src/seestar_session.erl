@@ -42,14 +42,14 @@
 -type connect_option() :: gen_tcp:connect_option() | {connect_timeout, timeout()}
                          | {ssl, [ssl:connect_option()]}.
 
--type 'query'() :: binary() | string().
+-type 'query'() :: iodata().
 -type query_id() :: binary().
 -type protocol_version() :: 3 | 4.
 -record(client_handle, {pid, proto}).
 -type client() :: #client_handle{pid :: pid(), proto :: protocol_version()}.
 
 -define(b2l(Term), case is_binary(Term) of true -> binary_to_list(Term); false -> Term end).
--define(l2b(Term), case is_list(Term) of true -> list_to_binary(Term); false -> Term end).
+-define(l2b(Term), iolist_to_binary(Term)).
 
 -record(req,
         {op :: seestar_frame:opcode(),
@@ -190,7 +190,7 @@ stop(Pid) ->
 %% @doc Synchoronously perform a CQL query using the specified consistency level.
 %% Returns a result of an appropriate type (void, rows, set_keyspace, schema_change).
 %% Use {@link seestar_result} module functions to work with the result.
--spec perform(pid(), 'query'(), seestar:consistency()) ->
+-spec perform(#client_handle{}, 'query'(), seestar:consistency()) ->
     {ok, Result :: seestar_result:result()} | {error, Error :: seestar_error:error()}.
 perform(Client, Query, Consistency) ->
     case request(Client, #'query'{'query' = ?l2b(Query), consistency = Consistency}, true) of
@@ -202,7 +202,7 @@ perform(Client, Query, Consistency) ->
 
 %% TODO doc
 %% @doc Asynchronously perform a CQL query using the specified consistency level.
--spec perform_async(pid(), 'query'(), seestar:consistency()) -> ok.
+-spec perform_async(#client_handle{}, 'query'(), seestar:consistency()) -> ok.
 perform_async(Client, Query, Consistency) ->
     Req = #'query'{'query' = ?l2b(Query), consistency = Consistency},
     request(Client, Req, false).
@@ -211,7 +211,7 @@ perform_async(Client, Query, Consistency) ->
 %% query id and column metadata for all the variables (if any).
 %% @see execute/3.
 %% @see execute/4.
--spec prepare(pid(), 'query'()) ->
+-spec prepare(#client_handle{}, 'query'()) ->
     {ok, Result :: seestar_result:prepared_result()} | {error, Error :: seestar_error:error()}.
 prepare(Client, Query) ->
     case request(Client, #prepare{'query' = ?l2b(Query)}, true) of
@@ -225,7 +225,7 @@ prepare(Client, Query) ->
 %% Use {@link seestar_result} module functions to work with the result.
 %% @see prepare/2.
 %% @see perform/3.
--spec execute(pid(),
+-spec execute(#client_handle{},
               query_id(),
               [seestar_cqltypes:type()], [seestar_cqltypes:value()],
               seestar:consistency()) ->
@@ -307,7 +307,7 @@ get_transport(ConnectOptions0) ->
 %% @doc
 %% Extracts the timeout from the conenct options. Returns a tuple with the first element
 %% being the timeout, and the second a proplist of the remaining options
--spec get_timeout([connect_option()]) -> {ssl|tcp, [connect_option()]}.
+-spec get_timeout([connect_option()]) -> {timeout(), [connect_option()]}.
 get_timeout(ConnectOptions0) ->
     Timeout = proplists:get_value(connect_timeout, ConnectOptions0, infinity),
     NewConnectOptions = proplists:delete(connect_timeout, ConnectOptions0),
